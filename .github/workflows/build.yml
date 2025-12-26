@@ -92,8 +92,14 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y ruby ruby-dev curl
+          apt-get install -y ruby ruby-dev curl gnupg
           gem install deb-s3
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          # Trust the key
+          echo "${{ secrets.GPG_KEY_ID }}:6:" | gpg --import-ownertrust
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -123,6 +129,8 @@ jobs:
               --s3-region auto \
               --endpoint "$S3_ENDPOINT" \
               --force-path-style \
+              --sign "${{ secrets.GPG_KEY_ID }}" \
+              --no-fail-if-exists \
               "$deb"
           done
 
@@ -134,17 +142,37 @@ jobs:
     strategy:
       matrix:
         fedora: ['43', 'rawhide']
+    container:
+      image: fedora:${{ matrix.fedora }}
     env:
       AWS_REGION: auto
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
     steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gnupg2 rpm-sign curl
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          # Configure RPM to use GPG for signing
+          echo "%_gpg_name ${{ secrets.GPG_KEY_ID }}" >> ~/.rpmmacros
+          echo "%__gpg /usr/bin/gpg" >> ~/.rpmmacros
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: fedora-${{ matrix.fedora }}-packages
           path: output
+
+      - name: Sign RPM packages
+        run: |
+          for rpm in output/*.rpm; do
+            echo "Signing $rpm"
+            rpm --addsign "$rpm"
+          done
 
       - name: Publish to RPM repository
         run: |
@@ -162,7 +190,7 @@ jobs:
           # Add packages to repository
           for rpm in output/*.rpm; do
             echo "Publishing $rpm to $REPO_ROOT"
-            ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" add --replace-existing "$rpm"
+            ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" add "$rpm"
           done
 
   # release:
