@@ -1,0 +1,185 @@
+name: Build NVIDIA Packages
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      nvidia_version:
+        description: 'NVIDIA driver version (leave empty for auto-detect)'
+        required: false
+        default: ''
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        ubuntu: ['24.04', '25.10']
+    container:
+      image: ubuntu:${{ matrix.ubuntu }}
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git curl wget ca-certificates build-essential \
+            debhelper dpkg-dev fakeroot dkms nodejs
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package
+        run: |
+          chmod +x build-package.sh
+          ./build-package.sh ${{ github.event.inputs.nvidia_version && format('--nvidia-version {0}', github.event.inputs.nvidia_version) || '' }}
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/output
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-${{ matrix.ubuntu }}-packages
+          path: output/*.deb
+
+  build-fedora:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        fedora: ['43', 'rawhide']
+    container:
+      image: fedora:${{ matrix.fedora }}
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y git curl wget ca-certificates rpm-build rpmdevtools \
+            gcc gcc-c++ make elfutils-libelf-devel akmods nodejs
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package
+        run: |
+          chmod +x build-package.sh
+          ./build-package.sh ${{ github.event.inputs.nvidia_version && format('--nvidia-version {0}', github.event.inputs.nvidia_version) || '' }}
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/output
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-${{ matrix.fedora }}-packages
+          path: output/*.rpm
+
+  publish-ubuntu:
+    needs: build-ubuntu
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    strategy:
+      matrix:
+        ubuntu: ['24.04', '25.10']
+    container:
+      image: ubuntu:${{ matrix.ubuntu }}
+    env:
+      AWS_REGION: auto
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y ruby ruby-dev curl
+          gem install deb-s3
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-${{ matrix.ubuntu }}-packages
+          path: output
+
+      - name: Publish to APT repository
+        run: |
+          # Determine codename from Ubuntu version
+          UBUNTU_VERSION="${{ matrix.ubuntu }}"
+          case "$UBUNTU_VERSION" in
+            24.04) CODENAME="noble" ;;
+            25.10) CODENAME="questing" ;;
+            *) CODENAME="$UBUNTU_VERSION" ;;
+          esac
+
+          # Upload packages to S3 APT repository
+          for deb in output/*.deb; do
+            echo "Publishing $deb to nvidia-armsbc/ubuntu/${CODENAME}"
+            deb-s3 upload \
+              --bucket packages \
+              --prefix nvidia-armsbc/ubuntu \
+              --codename "$CODENAME" \
+              --component main \
+              --arch arm64 \
+              --s3-region auto \
+              --endpoint "$S3_ENDPOINT" \
+              --force-path-style \
+              "$deb"
+          done
+
+  publish-fedora:
+    needs: build-fedora
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    strategy:
+      matrix:
+        fedora: ['43', 'rawhide']
+    env:
+      AWS_REGION: auto
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: fedora-${{ matrix.fedora }}-packages
+          path: output
+
+      - name: Publish to RPM repository
+        run: |
+          # Download rpmrepo-update
+          curl -L https://github.com/e2llm/rpmrepo-update/releases/latest/download/rpmrepo-update-linux-arm64 -o rpmrepo-update
+          chmod +x rpmrepo-update
+
+          # Determine repo path based on Fedora version
+          FEDORA_VERSION="${{ matrix.fedora }}"
+          REPO_ROOT="s3://packages/nvidia-armsbc/fedora/${FEDORA_VERSION}/aarch64/os"
+
+          # Initialize repo if it doesn't exist (idempotent)
+          ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" init --checksum sha256 || true
+
+          # Add packages to repository
+          for rpm in output/*.rpm; do
+            echo "Publishing $rpm to $REPO_ROOT"
+            ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" add --replace-existing "$rpm"
+          done
+
+  # release:
+  #   needs: [build-ubuntu] #, build-fedora]
+  #   if: startsWith(github.ref, 'refs/tags/')
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: packages
+  #         merge-multiple: true
+
+  #     - name: Create Release
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         files: packages/*
+  #         generate_release_notes: true
