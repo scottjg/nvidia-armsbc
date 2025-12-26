@@ -3,22 +3,22 @@ name: Build NVIDIA Packages
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
       nvidia_version:
-        description: 'NVIDIA driver version (leave empty for auto-detect)'
+        description: "NVIDIA driver version (leave empty for auto-detect)"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   build-ubuntu:
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
-        ubuntu: ['24.04', '25.10']
+        ubuntu: ["24.04", "25.10"]
     container:
       image: ubuntu:${{ matrix.ubuntu }}
     steps:
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
-        fedora: ['43', 'rawhide']
+        fedora: ["43", "rawhide"]
     container:
       image: fedora:${{ matrix.fedora }}
     steps:
@@ -80,7 +80,7 @@ jobs:
     environment: production
     strategy:
       matrix:
-        ubuntu: ['24.04', '25.10']
+        ubuntu: ["24.04", "25.10"]
     container:
       image: ubuntu:${{ matrix.ubuntu }}
     env:
@@ -141,7 +141,7 @@ jobs:
     environment: production
     strategy:
       matrix:
-        fedora: ['43', 'rawhide']
+        fedora: ["43", "rawhide"]
     container:
       image: fedora:${{ matrix.fedora }}
     env:
@@ -187,10 +187,17 @@ jobs:
           # Initialize repo if it doesn't exist (idempotent)
           ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" init --checksum sha256 || true
 
-          # Add packages to repository
+          # Add packages to repository (skip if already exists)
           for rpm in output/*.rpm; do
-            echo "Publishing $rpm to $REPO_ROOT"
-            ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" add "$rpm"
+            FILENAME=$(basename "$rpm")
+            CHECK_URL="https://pkg.scottjg.com/nvidia-armsbc/fedora/${FEDORA_VERSION}/aarch64/os/${FILENAME}"
+
+            if curl --head --silent --fail "$CHECK_URL" > /dev/null 2>&1; then
+              echo "Skipping $FILENAME (already exists)"
+            else
+              echo "Publishing $rpm to $REPO_ROOT"
+              ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" add "$rpm"
+            fi
           done
 
   # release:
