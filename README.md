@@ -43,6 +43,9 @@ sudo apt install nvidia-headless-${NVIDIA_VERSION}-open nvidia-utils-${NVIDIA_VE
 ### Fedora
 
 ```bash
+# Setup RPMFusion (we replace the drivers, but not the other dependencies)
+sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
 # Import signing key
 sudo rpm --import https://pkg.scottjg.com/nvidia-armsbc/signing-key.asc
 

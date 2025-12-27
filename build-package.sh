@@ -21,7 +21,7 @@ FORK_BRANCH_BASE="armsbc"
 NVIDIA_REPO="https://github.com/NVIDIA/open-gpu-kernel-modules.git"
 
 # Package naming
-PACKAGE_RELEASE="2"
+PACKAGE_RELEASE="3"
 PACKAGE_SUFFIX="armsbc"
 
 # Build directories
@@ -491,6 +491,9 @@ BuildRequires:  make
 
 Requires:       akmods
 Requires:       kernel-devel
+Requires:       gcc
+Requires:       gcc-c++
+Requires:       make
 Requires:       nvidia-kmod-common >= 3:%{nvidia_version}
 Requires(post): akmods
 Requires(preun): akmods
