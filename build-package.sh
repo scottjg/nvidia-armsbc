@@ -21,7 +21,7 @@ FORK_BRANCH_BASE="armsbc"
 NVIDIA_REPO="https://github.com/NVIDIA/open-gpu-kernel-modules.git"
 
 # Package naming
-PACKAGE_RELEASE="1"
+PACKAGE_RELEASE="2"
 PACKAGE_SUFFIX="armsbc"
 
 # Build directories
@@ -475,6 +475,7 @@ generate_rpm_spec() {
 %global package_release ${PACKAGE_RELEASE}
 
 Name:           akmod-%{kmod_name}
+Epoch:          3
 Version:        %{nvidia_version}
 Release:        %{package_release}%{?dist}
 Summary:        NVIDIA kernel module with ARM SBC patches (akmod)
@@ -490,6 +491,7 @@ BuildRequires:  make
 
 Requires:       akmods
 Requires:       kernel-devel
+Requires:       nvidia-kmod-common >= 3:%{nvidia_version}
 Requires(post): akmods
 Requires(preun): akmods
 
