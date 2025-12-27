@@ -187,9 +187,16 @@ jobs:
           # Initialize repo if it doesn't exist (idempotent)
           ./rpmrepo-update --backend s3 --s3-endpoint "$S3_ENDPOINT" --repo-root "$REPO_ROOT" init --checksum sha256 || true
 
-          # Add packages to repository (skip if already exists)
+          # Add packages to repository (skip src.rpm and existing packages)
           for rpm in output/*.rpm; do
             FILENAME=$(basename "$rpm")
+
+            # Skip source RPMs - they should never be in a binary repo
+            if [[ "$FILENAME" == *.src.rpm ]]; then
+              echo "Skipping $FILENAME (source RPM)"
+              continue
+            fi
+
             CHECK_URL="https://pkg.scottjg.com/nvidia-armsbc/fedora/${FEDORA_VERSION}/aarch64/os/${FILENAME}"
 
             if curl --head --silent --fail "$CHECK_URL" > /dev/null 2>&1; then

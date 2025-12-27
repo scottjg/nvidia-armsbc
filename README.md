@@ -28,15 +28,15 @@ curl -fsSL https://pkg.scottjg.com/nvidia-armsbc/signing-key.asc | sudo gpg --de
 # Add repository
 echo "deb [signed-by=/usr/share/keyrings/nvidia-armsbc.gpg] https://pkg.scottjg.com/nvidia-armsbc/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/nvidia-armsbc.list
 
-# Install
-sudo apt update
-sudo apt install nvidia-dkms-580-open-armsbc
-
-# Install NVIDIA userspace (from Ubuntu repos)
 # First, find the latest available driver major version:
 NVIDIA_VERSION=$(apt-cache search nvidia-dkms | grep -oP 'nvidia-dkms-\K[0-9]+(?=-open)' | sort -n | tail -1)
 echo "Latest NVIDIA driver version: $NVIDIA_VERSION"
 
+# Install this driver
+sudo apt update
+sudo apt install nvidia-dkms-${NVIDIA_VERSION}-open-armsbc
+
+# Install NVIDIA userspace (from Ubuntu repos)
 sudo apt install nvidia-headless-${NVIDIA_VERSION}-open nvidia-utils-${NVIDIA_VERSION}
 ```
 
