@@ -433,6 +433,83 @@ exit 0
 EOF
 }
 
+build_deb_metapackage() {
+    log "Building Ubuntu metapackage"
+
+    local nvidia_major="${NVIDIA_VERSION%%.*}"
+    local metapackage_name="nvidia-driver-${nvidia_major}-open-${PACKAGE_SUFFIX}"
+    local dkms_package_name="nvidia-dkms-${nvidia_major}-open-${PACKAGE_SUFFIX}"
+
+    local pkg_dir="$BUILD_DIR/metapackage"
+
+    # Create package structure
+    rm -rf "$pkg_dir"
+    mkdir -p "$pkg_dir/DEBIAN"
+    mkdir -p "$pkg_dir/usr/share/doc/${metapackage_name}"
+
+    # Create control file
+    generate_deb_metapackage_control > "$pkg_dir/DEBIAN/control"
+
+    # Create copyright file
+    cat > "$pkg_dir/usr/share/doc/${metapackage_name}/copyright" << EOF
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: NVIDIA Linux Driver
+Upstream-Contact: NVIDIA Corporation
+Source: https://github.com/NVIDIA/open-gpu-kernel-modules
+
+Files: *
+Copyright: NVIDIA Corporation
+License: NVIDIA-License
+ See /usr/share/doc/nvidia-kernel-common-${nvidia_major}/copyright
+EOF
+
+    # Build package
+    mkdir -p "$OUTPUT_DIR"
+    dpkg-deb --build --root-owner-group "$pkg_dir" \
+        "$OUTPUT_DIR/${metapackage_name}_${NVIDIA_VERSION}-${PACKAGE_RELEASE}_arm64.deb"
+
+    log "Built: ${metapackage_name}_${NVIDIA_VERSION}-${PACKAGE_RELEASE}_arm64.deb"
+}
+
+generate_deb_metapackage_control() {
+    local nvidia_major="${NVIDIA_VERSION%%.*}"
+
+    cat << EOF
+Package: nvidia-driver-${nvidia_major}-open-${PACKAGE_SUFFIX}
+Version: ${NVIDIA_VERSION}-${PACKAGE_RELEASE}
+Architecture: arm64
+Multi-Arch: foreign
+Maintainer: Scott J. Goldman <scottjg@umich.edu>
+Depends: libnvidia-gl-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ nvidia-dkms-${nvidia_major}-open-${PACKAGE_SUFFIX} (= ${NVIDIA_VERSION}-${PACKAGE_RELEASE}),
+ nvidia-kernel-common-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ nvidia-kernel-source-${nvidia_major}-open (>= ${NVIDIA_VERSION}),
+ libnvidia-compute-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ libnvidia-extra-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ nvidia-compute-utils-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ libnvidia-decode-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ libnvidia-encode-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ nvidia-utils-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ xserver-xorg-video-nvidia-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ libnvidia-cfg1-${nvidia_major} (>= ${NVIDIA_VERSION}),
+ libnvidia-fbc1-${nvidia_major} (>= ${NVIDIA_VERSION})
+Recommends: nvidia-settings, nvidia-prime (>= 0.8)
+Provides: nvidia-driver-${nvidia_major}-open (= ${NVIDIA_VERSION}-${PACKAGE_RELEASE})
+Conflicts: nvidia-driver-${nvidia_major}-open
+Replaces: nvidia-driver-${nvidia_major}-open
+Section: restricted/libs
+Priority: optional
+Homepage: https://github.com/NVIDIA/open-gpu-kernel-modules
+Description: NVIDIA driver (open kernel) metapackage for ARM SBC platforms
+ This metapackage installs the NVIDIA open kernel driver patched for
+ ARM SBC platforms (RK3588, etc.) along with all necessary userspace
+ components from the official Ubuntu repositories.
+ .
+ The kernel module is patched for non-cache-coherent PCIe support.
+ Patches from: https://github.com/scottjg/open-gpu-kernel-modules
+EOF
+}
+
 build_rpm_package() {
     log "Building Fedora RPM package"
 
@@ -604,6 +681,7 @@ main() {
     case "$PACKAGE_TYPE" in
         deb)
             build_deb_package
+            build_deb_metapackage
             ;;
         rpm)
             build_rpm_package
