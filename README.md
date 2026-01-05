@@ -23,6 +23,8 @@ The patches were mostly tested on the RK3588 platform (like the Orange Pi 5 Plus
 
 ```bash
 # Import signing key
+sudo apt update
+sudo apt install -y curl
 curl -fsSL https://pkg.scottjg.com/nvidia-armsbc/signing-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-armsbc.gpg
 
 # Add repository
@@ -32,12 +34,15 @@ echo "deb [signed-by=/usr/share/keyrings/nvidia-armsbc.gpg] https://pkg.scottjg.
 NVIDIA_VERSION=$(apt-cache search nvidia-dkms | grep -oP 'nvidia-dkms-\K[0-9]+(?=-open)' | sort -n | tail -1)
 echo "Latest NVIDIA driver version: $NVIDIA_VERSION"
 
-# Install this driver
+# Install this kernel driver
 sudo apt update
-sudo apt install nvidia-dkms-${NVIDIA_VERSION}-open-armsbc
+sudo apt install -y nvidia-dkms-${NVIDIA_VERSION}-open-armsbc
 
 # Install NVIDIA userspace (from Ubuntu repos)
-sudo apt install nvidia-headless-${NVIDIA_VERSION}-open nvidia-utils-${NVIDIA_VERSION}
+sudo apt install -y nvidia-headless-${NVIDIA_VERSION}-open nvidia-utils-${NVIDIA_VERSION}
+
+# If you want the desktop to work, install the desktop video drivers
+sudo apt install -y nvidia-driver-${NVIDIA_VERSION}-open-armsbc
 ```
 
 ### Fedora
@@ -59,7 +64,7 @@ gpgcheck=1
 gpgkey=https://pkg.scottjg.com/nvidia-armsbc/signing-key.asc
 EOF
 
-# Install
+# Install the kernel drivers
 sudo dnf install akmod-nvidia-armsbc
 
 # Install NVIDIA userspace (from RPM Fusion)

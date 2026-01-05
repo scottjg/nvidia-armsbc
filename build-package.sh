@@ -21,7 +21,7 @@ FORK_BRANCH_BASE="armsbc"
 NVIDIA_REPO="https://github.com/NVIDIA/open-gpu-kernel-modules.git"
 
 # Package naming
-PACKAGE_RELEASE="3"
+PACKAGE_RELEASE="4"
 PACKAGE_SUFFIX="armsbc"
 
 # Build directories
@@ -351,6 +351,7 @@ EOF
     cat > "$pkg_dir/etc/modprobe.d/nvidia-${PACKAGE_SUFFIX}-blacklist.conf" << 'EOF'
 blacklist nouveau
 options nouveau modeset=0
+options nvidia-drm modeset=1
 EOF
 
     # Create control file
@@ -612,6 +613,7 @@ mkdir -p %{buildroot}%{_sysconfdir}/modprobe.d
 cat > %{buildroot}%{_sysconfdir}/modprobe.d/%{kmod_name}.conf << 'MODPROBE'
 blacklist nouveau
 options nouveau modeset=0
+options nvidia-drm modeset=1
 MODPROBE
 
 cat > %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{nvidia_version}/akmods-build.sh << 'BUILDSCRIPT'
