@@ -10,15 +10,15 @@
 #   4. Clones and applies armsbc patches
 #   5. Builds the appropriate package (.deb or .rpm)
 
-set -e
+set -euo pipefail
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-FORK_REPO="https://github.com/scottjg/open-gpu-kernel-modules.git"
-FORK_BRANCH_BASE="armsbc"
-NVIDIA_REPO="https://github.com/NVIDIA/open-gpu-kernel-modules.git"
+FORK_REPO="${FORK_REPO:-https://github.com/scottjg/open-gpu-kernel-modules.git}"
+FORK_BRANCH_BASE="${FORK_BRANCH_BASE:-armsbc}"
+NVIDIA_REPO="${NVIDIA_REPO:-https://github.com/NVIDIA/open-gpu-kernel-modules.git}"
 
 # Package naming
 PACKAGE_RELEASE="4"
@@ -32,9 +32,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)/output}"
 # Argument parsing
 # ============================================================================
 
-NVIDIA_VERSION=""
-SKIP_DOWNLOAD=""
-VERBOSE=""
+NVIDIA_VERSION="${NVIDIA_VERSION:-}"
+SKIP_DOWNLOAD="${SKIP_DOWNLOAD:-}"
+VERBOSE="${VERBOSE:-}"
 
 usage() {
     cat << EOF
@@ -166,9 +166,10 @@ query_ubuntu_version() {
     apt-get update -qq >/dev/null 2>&1
 
     # Find latest nvidia-dkms-*-open package
-    local pkg=$(apt-cache search nvidia-dkms 2>/dev/null | \
-                grep -E 'nvidia-dkms-[0-9]+-open ' | \
-                sort -t'-' -k3 -n | tail -1 | awk '{print $1}')
+    local pkg
+    pkg=$(apt-cache search nvidia-dkms 2>/dev/null | \
+          grep -E 'nvidia-dkms-[0-9]+-open ' | \
+          sort -t'-' -k3 -n | tail -1 | awk '{print $1}' || true)
 
     if [ -z "$pkg" ]; then
         error "Could not find nvidia-dkms package in Ubuntu repos"
@@ -177,7 +178,7 @@ query_ubuntu_version() {
     # Get version from package
     NVIDIA_VERSION=$(apt-cache show "$pkg" 2>/dev/null | \
                      grep "^Version:" | head -1 | \
-                     awk '{print $2}' | cut -d'-' -f1)
+                     awk '{print $2}' | cut -d'-' -f1 || true)
 
     if [ -z "$NVIDIA_VERSION" ]; then
         error "Could not determine NVIDIA version from $pkg"
@@ -202,7 +203,7 @@ query_fedora_version() {
     local version=""
     for pkg in akmod-nvidia-open akmod-nvidia; do
         version=$(dnf info "$pkg" 2>/dev/null | \
-                  grep "^Version" | awk '{print $3}' | head -1)
+                  grep "^Version" | awk '{print $3}' | head -1 || true)
         if [ -n "$version" ]; then
             NVIDIA_VERSION="$version"
             log "Found NVIDIA version: $NVIDIA_VERSION (from $pkg)"
@@ -249,11 +250,17 @@ generate_patches() {
 
     cd fork.git
 
-    # Try versioned branch first (e.g., armsbc-590), fall back to base branch (armsbc)
-    if git fetch origin "$versioned_branch" 2>/dev/null; then
+    # Try versioned branch first (e.g., armsbc-610), fall back to base branch
+    # (armsbc). Use explicit refspecs because a fetch in a bare repository does
+    # not otherwise guarantee that the local branch ref is created or updated.
+    if git fetch origin \
+        "+refs/heads/${versioned_branch}:refs/heads/${versioned_branch}" \
+        2>/dev/null; then
         fork_branch="$versioned_branch"
         log "Using versioned branch: $fork_branch"
-    elif git fetch origin "$FORK_BRANCH_BASE" 2>/dev/null; then
+    elif git fetch origin \
+        "+refs/heads/${FORK_BRANCH_BASE}:refs/heads/${FORK_BRANCH_BASE}" \
+        2>/dev/null; then
         fork_branch="$FORK_BRANCH_BASE"
         log "Versioned branch $versioned_branch not found, using fallback branch: $fork_branch"
     else
@@ -262,20 +269,40 @@ generate_patches() {
 
     log "Generating patches from $fork_branch"
 
-    # Find merge base between the fork branch and main on our repo
-    git fetch origin main 2>/dev/null || error "Could not fetch main branch from $FORK_REPO"
-    local merge_base=$(git merge-base "$fork_branch" "main" 2>/dev/null)
+    # Use the exact NVIDIA release recorded by the patch branch as its base.
+    # NVIDIA main does not retain every maintenance release in a single linear
+    # history, so a merge-base against main can include unrelated release
+    # commits in the generated patch series.
+    local branch_version
+    branch_version=$(git show "${fork_branch}:version.mk" 2>/dev/null | \
+                     awk '$1 == "NVIDIA_VERSION" && $2 == "=" { print $3; exit }')
+    if [ -z "$branch_version" ]; then
+        error "Could not determine the NVIDIA base version for $fork_branch"
+    fi
 
-    if [ -z "$merge_base" ]; then
-        error "Could not find merge base between $fork_branch and main"
+    local base_ref="refs/remotes/nvidia/releases/${branch_version}"
+    git fetch "$NVIDIA_REPO" \
+        "+refs/tags/${branch_version}:${base_ref}" \
+        2>/dev/null || error "Could not fetch NVIDIA release tag $branch_version"
+
+    local patch_base
+    patch_base=$(git rev-parse "${base_ref}^{commit}" 2>/dev/null || true)
+    if [ -z "$patch_base" ] || \
+       ! git merge-base --is-ancestor "$patch_base" "$fork_branch"; then
+        error "NVIDIA release $branch_version is not an ancestor of $fork_branch"
     fi
 
     # Generate patches
+    rm -rf "$BUILD_DIR/patches"
     mkdir -p "$BUILD_DIR/patches"
-    git format-patch -o "$BUILD_DIR/patches" "${merge_base}..${fork_branch}"
+    git format-patch -o "$BUILD_DIR/patches" "${patch_base}..${fork_branch}"
 
     PATCHES_DIR="$BUILD_DIR/patches"
-    log "Generated $(ls -1 "$PATCHES_DIR"/*.patch 2>/dev/null | wc -l) patches"
+    local patches=("$PATCHES_DIR"/*.patch)
+    if [ ! -e "${patches[0]}" ]; then
+        error "No patches were generated from $fork_branch"
+    fi
+    log "Generated ${#patches[@]} patches"
 }
 
 apply_patches() {
@@ -283,13 +310,18 @@ apply_patches() {
 
     cd "$SOURCE_DIR"
 
-    for patch in "$PATCHES_DIR"/*.patch; do
-        if [ -f "$patch" ]; then
-            echo "Applying $(basename "$patch")..."
-            git apply --check "$patch" 2>/dev/null || true
-            git apply "$patch" || {
-                echo "Warning: patch may have partially applied: $(basename "$patch")"
-            }
+    local patches=("$PATCHES_DIR"/*.patch)
+    if [ ! -e "${patches[0]}" ]; then
+        error "No patches found in $PATCHES_DIR"
+    fi
+
+    for patch in "${patches[@]}"; do
+        echo "Applying $(basename "$patch")..."
+        if ! git apply --check "$patch"; then
+            error "Patch does not apply cleanly: $(basename "$patch")"
+        fi
+        if ! git apply "$patch"; then
+            error "Failed to apply patch: $(basename "$patch")"
         fi
     done
 }
@@ -695,4 +727,3 @@ main() {
 }
 
 main "$@"
-
