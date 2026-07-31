@@ -21,7 +21,7 @@ FORK_BRANCH_BASE="${FORK_BRANCH_BASE:-armsbc}"
 NVIDIA_REPO="${NVIDIA_REPO:-https://github.com/NVIDIA/open-gpu-kernel-modules.git}"
 
 # Package naming
-PACKAGE_RELEASE="4"
+PACKAGE_RELEASE="5"
 PACKAGE_SUFFIX="armsbc"
 
 # Build directories
